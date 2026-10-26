@@ -17,10 +17,10 @@ def main():
         subprocess.run(['git', '-C', str(destination), 'submodule', 'update', '--init', '--recursive'], check=True)
     subprocess.run(['git', 'clone', '--branch', 'v0.4.0', '--depth', '1',
                     'https://github.com/NVlabs/nvdiffrast.git', '/opt/nvdiffrast'], check=True)
-    # MoGe is used only by single-view inference, which this image does not serve.
+    # MoGe is single-view only; Gradio is an interactive UI. Neither is used by this worker.
     requirements = Path('/opt/Pixal3D/requirements.txt')
     requirements.write_text('\n'.join(line for line in requirements.read_text().splitlines()
-                                    if 'microsoft/MoGe' not in line)+'\n')
+                                    if 'microsoft/MoGe' not in line and line.strip() != 'gradio')+'\n')
 
 
 if __name__ == '__main__':

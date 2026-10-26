@@ -38,5 +38,7 @@ ENV PYTHONPATH=/opt/Pixal3D:/opt/worker \
     XDG_CACHE_HOME=/runpod-volume/pixal3d/cache \
     MAX_VIEWS=8 \
     MAX_RESOLUTION=1024
-RUN python -c "import runpod, torch, natten, o_voxel, cumesh; import inference_mv"
+# GPU-dependent imports initialize Triton drivers and must run on a real worker.
+RUN python -c "import runpod, torch, natten; import importlib.util; assert all(importlib.util.find_spec(n) for n in ('o_voxel', 'cumesh', 'flex_gemm', 'inference_mv'))" \
+    && python -m py_compile /opt/worker/*.py /opt/Pixal3D/inference_mv.py
 CMD ["python", "-u", "/opt/worker/handler.py"]
