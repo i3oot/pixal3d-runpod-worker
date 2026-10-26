@@ -169,6 +169,43 @@ In that mode, use `RUNPOD_VOLUME_ID`, `RUNPOD_S3_ENDPOINT`, `RUNPOD_S3_REGION`,
 of the generic S3 variables. The worker accesses its mounted volume directly and
 needs no storage keys. Generic S3 variables take precedence if both are set.
 
+Generate and download in one command:
+
+```sh
+python tools/image_to_3d/runpod_service/client.py generate \
+  front.png right.png back.png left.png \
+  --cameras transforms.json -o output/vehicle.glb
+```
+
+This uploads the original image bytes, submits the job, polls for completion,
+and downloads the verified GLB. A local `.job.json` ticket beside the output
+allows the same command to resume without generating a duplicate model. A
+matching ticket must have the same image checksums, camera metadata and options.
+If an output already exists, use `--overwrite` to download it again.
+
+For a prepared batch manifest:
+
+```sh
+python tools/image_to_3d/runpod_service/client.py batch \
+  --manifest vehicles.json --output-dir output/vehicles
+```
+
+A manifest contains an `assets` array. Each entry has an `id`, an `images` array
+of `{ "path": "...", "sha256": "..." }` records, and a `cameras` JSON file path.
+Paths are relative to the current working directory, or absolute. Use
+`--asset ID` (repeatable) to select a subset. The client checks every selected
+asset before submitting any jobs, queues the batch first to keep a worker warm,
+then downloads each result. Re-running reuses matching saved tickets; add
+`--overwrite` if some local outputs already exist.
+
+All connection configuration comes from runtime environment variables. The
+local client reads no Kubernetes Secret or deployment settings file. RunPod
+Secret references configured on a worker are independent of the local client's
+S3 environment. The hidden API-key prompt is optional when the key is absent
+from the environment; it is reused in memory for that client process.
+
+Separate queue/download commands remain available:
+
 ```sh
 python tools/image_to_3d/runpod_service/client.py submit \
   front.png right.png back.png left.png \
@@ -201,7 +238,7 @@ volume until explicitly deleted; monitor free space.
 python -m unittest discover -s tools/image_to_3d/runpod_service -p 'test_*.py' -v
 ```
 
-Thirteen CPU tests cover initialization reuse, retry reuse, conflicting job IDs,
+Sixteen CPU tests cover initialization reuse, retry reuse, conflicting job IDs,
 partial-output failure handling, camera/path validation, multi-only cache
 selection, immutable snapshot overlays, external S3 commit/retry/failure handling and durable
 download without GPU API use.

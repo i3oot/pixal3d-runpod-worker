@@ -233,6 +233,54 @@ class WorkerTests(unittest.TestCase):
             worker({'id': 'external-one', 'input': self.data})
         self.assertEqual(backend.calls, 0)
 
+    def client_args(self):
+        cameras = self.root/'cameras.json'
+        cameras.write_text(json.dumps(self.data['cameras']))
+        return argparse.Namespace(images=[self.root/key for key in self.data['images']], cameras=cameras,
+            output=self.root/'output.glb', ticket=None, endpoint='endpoint', mode='multi',
+            resolution=1024, seed=42, steps=12, faces=100000, texture_size=2048,
+            timeout=1, overwrite=False)
+
+    def test_generate_resumes_matching_ticket_without_resubmitting(self):
+        args = self.client_args()
+        images, _, data = client.input_request(args, 'original-upload')
+        ticket = args.output.with_suffix('.job.json')
+        ticket.write_text(json.dumps({'input': data, 'input_sha256': [client.file_hash(p) for p in images],
+                                     'endpoint_id': 'endpoint'}))
+        with patch.object(client, 'submit', side_effect=AssertionError('Must reuse the existing job')), \
+             patch.object(client, 'fetch') as fetch:
+            client.generate(args)
+        fetch.assert_called_once()
+        args.seed += 1
+        with self.assertRaisesRegex(ValueError, 'different inputs'):
+            client.generate(args)
+
+    def batch_args(self):
+        args = self.client_args()
+        records = [{'path': str(p), 'sha256': client.file_hash(p)} for p in args.images]
+        args.manifest = self.root/'batch.json'
+        args.manifest.write_text(json.dumps({'assets': [
+            {'id': ident, 'images': records, 'cameras': str(args.cameras)} for ident in ('V01', 'V03')]}))
+        args.output_dir, args.asset = self.root/'models', None
+        return args
+
+    def test_batch_queues_every_job_before_waiting_for_results(self):
+        args, events = self.batch_args(), []
+        with patch.object(client, 'submit', side_effect=lambda a: events.append(('submit', a.output.parent.name))), \
+             patch.object(client, 'fetch', side_effect=lambda a: events.append(('fetch', a.output.parent.name))):
+            client.batch(args)
+        self.assertEqual(events, [('submit', 'V01'), ('submit', 'V03'), ('fetch', 'V01'), ('fetch', 'V03')])
+
+    def test_batch_preflights_all_assets_before_any_billed_submission(self):
+        args = self.batch_args()
+        doc = json.loads(args.manifest.read_text())
+        doc['assets'][1]['images'][0]['sha256'] = 'changed'
+        args.manifest.write_text(json.dumps(doc))
+        with patch.object(client, 'submit') as submit:
+            with self.assertRaisesRegex(ValueError, 'checksum'):
+                client.batch(args)
+        submit.assert_not_called()
+
     def test_completed_result_download_does_not_need_runpod_api(self):
         result = handler.Worker(FakeBackend(), self.root)({'id': 'job-one', 'input': self.data})
         class Storage:

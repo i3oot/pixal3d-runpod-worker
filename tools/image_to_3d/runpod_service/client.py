@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Upload references, queue Pixal3D jobs and download durable results."""
 import argparse
+from functools import lru_cache
 import getpass
 import json
 import os
@@ -12,17 +13,21 @@ import urllib.request
 import uuid
 
 from protocol import PREFIX, file_hash, job_id, validate_input
-
-
 from storage import bucket_name, read_result, s3_client
+
+
+@lru_cache(maxsize=1)
+def api_key():
+    value = os.environ.get('RUNPOD_API_KEY') or getpass.getpass('RunPod API key: ')
+    if not value:
+        raise ValueError('RunPod API key is required.')
+    return value
 
 
 class RunpodAPI:
     def __init__(self, endpoint):
         self.endpoint = job_id(endpoint)
-        self.key = os.environ.get('RUNPOD_API_KEY') or getpass.getpass('RunPod API key: ')
-        if not self.key:
-            raise ValueError('RunPod API key is required.')
+        self.key = api_key()
 
     def request(self, operation, payload=None):
         request = urllib.request.Request(f'https://api.runpod.ai/v2/{self.endpoint}/{operation}',
@@ -35,12 +40,7 @@ class RunpodAPI:
             raise RuntimeError(f'RunPod returned HTTP {error.code}.') from None
 
 
-def submit(args):
-    if args.ticket.exists():
-        raise ValueError('Ticket already exists; use a new ticket path or fetch the existing job.')
-    storage, bucket = s3_client(), bucket_name()
-    api = RunpodAPI(args.endpoint or os.environ['RUNPOD_ENDPOINT_ID'])
-    run = uuid.uuid4().hex
+def input_request(args, run):
     images = [path.resolve() for path in args.images]
     for image in images:
         if not image.is_file() or image.stat().st_size > 32*1024*1024:
@@ -51,6 +51,16 @@ def submit(args):
     if args.cameras:
         data['cameras'] = json.loads(args.cameras.read_text())
     validate_input(data, args.mode, max_resolution=1536)
+    return images, keys, data
+
+
+def submit(args):
+    if args.ticket.exists():
+        raise ValueError('Ticket already exists; use a new ticket path or fetch the existing job.')
+    images, keys, data = input_request(args, uuid.uuid4().hex)
+    args.ticket.parent.mkdir(parents=True, exist_ok=True)
+    storage, bucket = s3_client(), bucket_name()
+    api = RunpodAPI(args.endpoint or os.environ['RUNPOD_ENDPOINT_ID'])
     for image, key in zip(images, keys):
         storage.upload_file(str(image), bucket, key)
     submitted = api.request('run', {'input': data})
@@ -62,6 +72,67 @@ def submit(args):
     with args.ticket.open('x') as stream:
         json.dump(ticket, stream, indent=2)
     print(f'Queued {identifier}; ticket: {args.ticket}')
+
+
+def preflight(args):
+    args.output = args.output.absolute()
+    if args.output.suffix.lower() != '.glb':
+        raise ValueError('Output must end in .glb.')
+    if args.output.exists() and not args.overwrite:
+        raise ValueError('Output exists; use --overwrite to replace it.')
+    args.ticket = args.ticket or args.output.with_suffix('.job.json')
+    images, _, data = input_request(args, 'preflight')
+    if args.output.resolve() in images:
+        raise ValueError('Output cannot replace an input image.')
+    if args.ticket.exists():
+        saved = json.loads(args.ticket.read_text())
+        previous = {k: v for k, v in saved['input'].items() if k != 'images'}
+        requested = {k: v for k, v in data.items() if k != 'images'}
+        endpoint = args.endpoint or os.environ.get('RUNPOD_ENDPOINT_ID')
+        if (saved['input_sha256'] != [file_hash(p) for p in images] or previous != requested
+                or (endpoint and endpoint != saved['endpoint_id'])):
+            raise ValueError('Existing ticket belongs to different inputs/options/endpoint; use a new output or ticket path.')
+
+
+def generate(args):
+    preflight(args)
+    if not args.ticket.exists():
+        submit(args)
+    fetch(args)
+
+
+def batch(args):
+    manifest = json.loads(args.manifest.read_text())
+    assets = manifest['assets']
+    if args.asset:
+        selected = set(args.asset)
+        if selected - {a['id'] for a in assets}:
+            raise ValueError('An --asset ID was not found in the manifest.')
+        assets = [a for a in assets if a['id'] in selected]
+    if not assets:
+        raise ValueError('No assets selected.')
+    jobs, identifiers = [], set()
+    for asset in assets:
+        identifier = job_id(asset['id'])
+        if identifier in identifiers:
+            raise ValueError('Duplicate asset ID in manifest.')
+        identifiers.add(identifier)
+        images = [Path(image['path']) for image in asset['images']]
+        for path, record in zip(images, asset['images']):
+            if file_hash(path) != record['sha256']:
+                raise ValueError('An image differs from its recorded source checksum.')
+        job = argparse.Namespace(**vars(args))
+        job.images, job.cameras = images, Path(asset['cameras'])
+        job.output, job.ticket = args.output_dir/identifier/'pixal3d.glb', None
+        preflight(job)
+        jobs.append(job)
+    # Validate the entire batch before any uploads or billed job submissions.
+    # Queue every job first so one warm worker can process the batch continuously.
+    for job in jobs:
+        if not job.ticket.exists():
+            submit(job)
+    for job in jobs:
+        fetch(job)
 
 
 def download(storage, bucket, result, output, overwrite=False):
@@ -111,23 +182,42 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(required=True)
     enqueue = commands.add_parser('submit')
+    def options(command):
+        command.add_argument('--endpoint')
+        command.add_argument('--mode', choices=('multi',), default='multi')
+        command.add_argument('--resolution', type=int, choices=(1024, 1536), default=1024)
+        command.add_argument('--seed', type=int, default=42)
+        command.add_argument('--steps', type=int, default=12)
+        command.add_argument('--faces', type=int, default=100000)
+        command.add_argument('--texture-size', type=int, default=2048)
+    def retrieval(command):
+        command.add_argument('--timeout', type=float, default=10800)
+        command.add_argument('--overwrite', action='store_true')
     enqueue.add_argument('images', type=Path, nargs='+')
     enqueue.add_argument('--ticket', type=Path, required=True)
-    enqueue.add_argument('--endpoint')
-    enqueue.add_argument('--mode', choices=('multi',), default='multi')
-    enqueue.add_argument('--cameras', type=Path)
-    enqueue.add_argument('--resolution', type=int, choices=(1024, 1536), default=1024)
-    enqueue.add_argument('--seed', type=int, default=42)
-    enqueue.add_argument('--steps', type=int, default=12)
-    enqueue.add_argument('--faces', type=int, default=100000)
-    enqueue.add_argument('--texture-size', type=int, default=2048)
+    enqueue.add_argument('--cameras', type=Path, required=True)
+    options(enqueue)
     enqueue.set_defaults(action=submit)
     retrieve = commands.add_parser('fetch')
     retrieve.add_argument('ticket', type=Path)
     retrieve.add_argument('-o', '--output', type=Path, required=True)
-    retrieve.add_argument('--timeout', type=float, default=10800)
-    retrieve.add_argument('--overwrite', action='store_true')
+    retrieval(retrieve)
     retrieve.set_defaults(action=fetch)
+    create = commands.add_parser('generate', help='Upload, queue, wait and download; resumes a matching saved ticket')
+    create.add_argument('images', type=Path, nargs='+')
+    create.add_argument('--cameras', type=Path, required=True)
+    create.add_argument('-o', '--output', type=Path, required=True)
+    create.add_argument('--ticket', type=Path)
+    options(create)
+    retrieval(create)
+    create.set_defaults(action=generate)
+    fleet = commands.add_parser('batch', help='Queue a manifest of original references, then download all outputs')
+    fleet.add_argument('--manifest', type=Path, required=True)
+    fleet.add_argument('--output-dir', type=Path, required=True)
+    fleet.add_argument('--asset', action='append', help='Select an asset ID; repeat to select several')
+    options(fleet)
+    retrieval(fleet)
+    fleet.set_defaults(action=batch)
     args = parser.parse_args()
     from botocore.exceptions import BotoCoreError, ClientError
     try:
