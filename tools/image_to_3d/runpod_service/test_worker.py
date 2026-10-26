@@ -16,7 +16,7 @@ import glb
 import handler
 import client
 from protocol import validate_input
-from model_cache import required_files, prepare_model_path
+from model_cache import required_files, prepare_model_path, model_snapshot
 
 
 def glb_bytes():
@@ -119,6 +119,23 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(json.loads((overlay/'pipeline_mv.json').read_text())['args']['rembg_model']['args']['model_name'],
                          'ZhengPeng7/BiRefNet')
         self.assertNotIn('pipeline.json', selected)
+
+    def test_read_only_platform_cache_avoids_hub_download(self):
+        from protocol import MODEL_REVISION
+        hub = self.root/'platform-hub'
+        snapshot = hub/'models--TencentARC--Pixal3D'/'snapshots'/MODEL_REVISION
+        (snapshot/'ckpts').mkdir(parents=True)
+        config = {'args': {'models': {'flow': 'ckpts/flow_mv'}}}
+        (snapshot/'pipeline_mv.json').write_text(json.dumps(config))
+        for extension in ('.json', '.safetensors'):
+            (snapshot/('ckpts/flow_mv'+extension)).write_bytes(b'fixture')
+        forbidden_hub = types.SimpleNamespace(hf_hub_download=lambda *a, **k: self.fail('Unexpected download'),
+                                             snapshot_download=lambda *a, **k: self.fail('Unexpected download'))
+        with patch.dict(sys.modules, {'huggingface_hub': forbidden_hub}), \
+             patch.dict(os.environ, {'PIXAL_MODEL_CACHE_HUB': str(hub)}):
+            actual, actual_config = model_snapshot()
+        self.assertEqual(actual, snapshot)
+        self.assertEqual(actual_config, config)
 
     def test_startup_loads_once_and_serves_two_jobs(self):
         loads, results = [], []

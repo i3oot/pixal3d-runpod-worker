@@ -87,6 +87,20 @@ Configure the worker with these environment variables:
 | `TORCH_HOME` | Writable Torch cache path |
 | `XDG_CACHE_HOME` | Writable helper cache path |
 | `VOLUME_ROOT` | Mount root if volume storage is used |
+| `PIXAL_MODEL_CACHE_HUB` | Optional read-only RunPod Hugging Face hub cache root |
+
+RunPod's optional [cached model](https://docs.runpod.io/serverless/endpoints/model-caching)
+feature works without a network volume. Choose the Pixal3D repository in the
+console's Cached model field and set `PIXAL_MODEL_CACHE_HUB` to the platform's
+Hugging Face hub cache root. The worker checks for the exact pinned revision and
+all required multi-view files. If they exist, it reads them in place and writes
+its config overlay to the writable helper cache. Otherwise it falls back to a
+selective download. Helper models still use the writable cache configured above.
+
+RunPod currently caches an entire selected repository, so its host cache can
+contain the upstream single-view weights as well. This service loads only the
+multi-view models. Those cached model files are separate from external job
+artifacts and do not require a paid network volume.
 
 Without a persistent cache, each fresh worker downloads the roughly 26–30 GB
 model cache. This increases cold start time and billed startup work. Temporary
@@ -187,7 +201,7 @@ volume until explicitly deleted; monitor free space.
 python -m unittest discover -s tools/image_to_3d/runpod_service -p 'test_*.py' -v
 ```
 
-Twelve CPU tests cover initialization reuse, retry reuse, conflicting job IDs,
+Thirteen CPU tests cover initialization reuse, retry reuse, conflicting job IDs,
 partial-output failure handling, camera/path validation, multi-only cache
 selection, immutable snapshot overlays, external S3 commit/retry/failure handling and durable
 download without GPU API use.
