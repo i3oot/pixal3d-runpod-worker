@@ -22,12 +22,15 @@ def model_snapshot():
     # every multi-view checkpoint; otherwise use the normal selective download.
     cached_hub = os.environ.get('PIXAL_MODEL_CACHE_HUB')
     if cached_hub:
-        cached = Path(cached_hub)/'models--TencentARC--Pixal3D'/'snapshots'/MODEL_REVISION
-        config_path = cached/'pipeline_mv.json'
-        if config_path.is_file():
-            config = json.loads(config_path.read_text())
-            if all((cached/name).is_file() for name in required_files(config) if name.startswith('ckpts/')):
-                return cached, config
+        # The console normalizes repository IDs to lowercase; older cache hosts
+        # can retain the canonical Hugging Face casing. Accept either directory.
+        for repository in ('models--TencentARC--Pixal3D', 'models--tencentarc--pixal3d'):
+            cached = Path(cached_hub)/repository/'snapshots'/MODEL_REVISION
+            config_path = cached/'pipeline_mv.json'
+            if config_path.is_file():
+                config = json.loads(config_path.read_text())
+                if all((cached/name).is_file() for name in required_files(config) if name.startswith('ckpts/')):
+                    return cached, config
     from huggingface_hub import hf_hub_download, snapshot_download
     path = hf_hub_download('TencentARC/Pixal3D', 'pipeline_mv.json', revision=MODEL_REVISION)
     config = json.loads(Path(path).read_text())

@@ -131,11 +131,17 @@ class WorkerTests(unittest.TestCase):
             (snapshot/('ckpts/flow_mv'+extension)).write_bytes(b'fixture')
         forbidden_hub = types.SimpleNamespace(hf_hub_download=lambda *a, **k: self.fail('Unexpected download'),
                                              snapshot_download=lambda *a, **k: self.fail('Unexpected download'))
-        with patch.dict(sys.modules, {'huggingface_hub': forbidden_hub}), \
-             patch.dict(os.environ, {'PIXAL_MODEL_CACHE_HUB': str(hub)}):
-            actual, actual_config = model_snapshot()
-        self.assertEqual(actual, snapshot)
-        self.assertEqual(actual_config, config)
+        for lowercase in (False, True):
+            with self.subTest(lowercase=lowercase):
+                if lowercase:
+                    renamed = hub/'models--tencentarc--pixal3d'
+                    (hub/'models--TencentARC--Pixal3D').rename(renamed)
+                    snapshot = renamed/'snapshots'/MODEL_REVISION
+                with patch.dict(sys.modules, {'huggingface_hub': forbidden_hub}), \
+                     patch.dict(os.environ, {'PIXAL_MODEL_CACHE_HUB': str(hub)}):
+                    actual, actual_config = model_snapshot()
+                self.assertEqual(actual, snapshot)
+                self.assertEqual(actual_config, config)
 
     def test_startup_loads_once_and_serves_two_jobs(self):
         loads, results = [], []
