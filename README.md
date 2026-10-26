@@ -115,6 +115,14 @@ without needing a running GPU. The bucket stays private. Grant workers read
 access to `pixal3d/inputs/` and read/write access to `pixal3d/outputs/`; clients
 need input write and output read. Neither needs bucket administration permissions.
 
+For Hetzner Object Storage, use the bucket's location endpoint, for example
+`S3_ENDPOINT_URL=https://fsn1.your-objectstorage.com`, `S3_REGION=fsn1` and
+`S3_ADDRESSING_STYLE=virtual` (or the matching `nbg1`/`hel1` values). Endpoint
+configuration is separate from the chosen EU RunPod GPU datacenter. Transfer
+from Hetzner to RunPod is external egress, even when both are in Europe; it uses
+the Hetzner account's traffic allowance and may incur overage charges. See the
+[Hetzner S3 setup guide](https://docs.hetzner.com/storage/object-storage/getting-started/using-s3-api-tools/).
+
 The S3 client also supports the normal AWS credential chain if explicit `S3_*`
 keys are absent. Do not embed secrets in endpoint URLs or request payloads.
 A private MinIO deployment must be reachable over HTTPS from RunPod workers and
