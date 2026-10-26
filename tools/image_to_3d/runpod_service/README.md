@@ -2,8 +2,8 @@
 
 Queue-based worker with RunPod API-key authentication, one initialized model per
 warm worker, persistent textured GLB outputs and GPU scale-to-zero.
-**Multi-view only: no single-view checkpoints or TRELLIS model weights.** Some
-upstream TRELLIS.2 export code is required by Pixal3D and included as a dependency.
+**Multi-view only.** The worker downloads only the checkpoints required by
+Pixal3D multi-view inference.
 
 The CPU contract tests pass. CUDA image compilation, real GPU inference and live
 endpoint deployment still need verification; do not treat the GPU profile below
@@ -77,7 +77,7 @@ Verify current [GPU pricing](https://www.runpod.io/product/serverless) and
 - Set `PIXAL_MODE=multi`, `PIXAL_LOW_VRAM=1`, `MAX_VIEWS=4`, `MAX_RESOLUTION=1024`.
 - Use a restricted RunPod API key scoped to this endpoint on the client.
 
-The worker refuses startup without the volume mount. Weights are downloaded on
+By default the worker requires a model-cache volume. Weights are downloaded on
 first startup and reused from persistent storage on later cold starts. Each warm
 worker initializes one backend before accepting jobs and serializes requests.
 Queue the whole batch to keep one worker warm. After the queue drains, the idle
@@ -91,18 +91,48 @@ max workers to one if an old endpoint leaves a new batch queued.
 python -m pip install -r tools/image_to_3d/runpod_service/requirements-client.txt
 ```
 
-Provide these through your local runtime environment or secret manager, never in
-tracked files. No account or storage credential is required inside the worker.
+Provide credentials through runtime environment variables or a secret manager,
+never in tracked files. RunPod API keys are client-only. External S3 credentials
+are needed on both the client and the GPU worker.
 
 | Variable | Purpose |
 | --- | --- |
 | `RUNPOD_ENDPOINT_ID` | Queue endpoint ID |
 | `RUNPOD_API_KEY` | Restricted endpoint key; alternatively use the hidden prompt |
-| `RUNPOD_VOLUME_ID` | Network-volume ID / S3 bucket name |
-| `RUNPOD_S3_ENDPOINT` | Datacenter S3 API HTTPS URL |
-| `RUNPOD_S3_REGION` | Matching datacenter ID |
-| `RUNPOD_S3_ACCESS_KEY_ID` | Separate RunPod S3 access key ID |
-| `RUNPOD_S3_SECRET_ACCESS_KEY` | Separate RunPod S3 secret access key |
+| `S3_BUCKET` | Your external bucket name |
+| `S3_ENDPOINT_URL` | Your provider's HTTPS S3 endpoint; omit for AWS S3 |
+| `S3_REGION` | Provider region, default `us-east-1` |
+| `S3_ACCESS_KEY_ID` | Bucket-scoped access key ID |
+| `S3_SECRET_ACCESS_KEY` | Bucket-scoped secret access key |
+| `S3_SESSION_TOKEN` | Optional temporary-credential token |
+| `S3_ADDRESSING_STYLE` | `path` (default), `virtual` or `auto`, as required by provider |
+
+Set **`ARTIFACT_STORAGE=s3` on the worker** to use an external S3-compatible
+provider for all input images and GLBs. The client uploads inputs directly to
+your bucket; the worker downloads them, generates the model, uploads the GLB,
+then writes completion metadata last. Clients download directly from the bucket
+without needing a running GPU. The bucket stays private. Grant workers read
+access to `pixal3d/inputs/` and read/write access to `pixal3d/outputs/`; clients
+need input write and output read. Neither needs bucket administration permissions.
+
+The S3 client also supports the normal AWS credential chain if explicit `S3_*`
+keys are absent. Do not embed secrets in endpoint URLs or request payloads.
+A private MinIO deployment must be reachable over HTTPS from RunPod workers and
+the client. Provider request and data-transfer charges can apply.
+
+Model caching is independent of artifact storage. Keeping the network volume
+for the roughly 26–30 GB model cache avoids repeated checkpoint downloads. To
+use **no RunPod network volume**, set `ALLOW_EPHEMERAL_CACHE=1` alongside
+`ARTIFACT_STORAGE=s3`, set `HF_HOME`, `TORCH_HOME` and `XDG_CACHE_HOME` to writable
+container-disk cache paths, and allocate enough container disk for the image,
+cache and temporary job files. Each fresh worker then downloads weights again;
+that can substantially increase startup time and GPU cost.
+
+Legacy RunPod-volume storage remains available with `ARTIFACT_STORAGE=volume`.
+In that mode, use `RUNPOD_VOLUME_ID`, `RUNPOD_S3_ENDPOINT`, `RUNPOD_S3_REGION`,
+`RUNPOD_S3_ACCESS_KEY_ID` and `RUNPOD_S3_SECRET_ACCESS_KEY` on the client instead
+of the generic S3 variables. The worker accesses its mounted volume directly and
+needs no storage keys. Generic S3 variables take precedence if both are set.
 
 ```sh
 python tools/image_to_3d/runpod_service/client.py submit \
@@ -136,9 +166,10 @@ volume until explicitly deleted; monitor free space.
 python -m unittest discover -s tools/image_to_3d/runpod_service -p 'test_*.py' -v
 ```
 
-Nine CPU tests cover initialization reuse, retry reuse, conflicting job IDs,
+Twelve CPU tests cover initialization reuse, retry reuse, conflicting job IDs,
 partial-output failure handling, camera/path validation, multi-only cache
-selection, immutable snapshot overlays and durable download without GPU API use.
+selection, immutable snapshot overlays, external S3 commit/retry/failure handling and durable
+download without GPU API use.
 These do not verify CUDA compatibility, model quality or peak VRAM. Before normal
 traffic, run two real jobs on one worker, validate the outputs, then verify worker
 count reaches zero and downloads still work.

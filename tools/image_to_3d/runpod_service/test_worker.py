@@ -45,6 +45,35 @@ class FakeBackend:
         self.cleaned += 1
 
 
+class MemoryS3:
+    class exceptions:
+        class NoSuchKey(Exception):
+            pass
+
+    def __init__(self):
+        self.objects, self.metadata, self.commits = {}, {}, []
+        self.fail_upload = False
+
+    def get_object(self, Bucket, Key):
+        if Key not in self.objects:
+            raise self.exceptions.NoSuchKey()
+        return {'Body': io.BytesIO(self.objects[Key]), 'ContentLength': len(self.objects[Key])}
+
+    def head_object(self, Bucket, Key):
+        return {'ContentLength': len(self.objects[Key]), 'Metadata': self.metadata.get(Key, {})}
+
+    def upload_file(self, filename, bucket, key, ExtraArgs):
+        if self.fail_upload:
+            raise RuntimeError('Simulated storage failure')
+        self.objects[key] = Path(filename).read_bytes()
+        self.metadata[key] = ExtraArgs['Metadata']
+        self.commits.append(key)
+
+    def put_object(self, Bucket, Key, Body, **kwargs):
+        self.objects[Key] = Body
+        self.commits.append(Key)
+
+
 class WorkerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -145,6 +174,47 @@ class WorkerTests(unittest.TestCase):
         data = {**self.data, 'images': ['pixal3d/inputs/run/escape.png']*2}
         with self.assertRaisesRegex(ValueError, 'permitted'):
             handler.Worker(FakeBackend(), self.root)({'id': 'job-one', 'input': data})
+
+    def external_worker(self, fail_upload=False):
+        from s3_worker import S3Worker
+        storage = MemoryS3()
+        for key in self.data['images']:
+            storage.objects[key] = b'fixture image'
+        storage.fail_upload = fail_upload
+        backend = FakeBackend()
+        return S3Worker(backend, storage, 'external-bucket'), backend, storage
+
+    def test_external_s3_commits_metadata_last_and_reuses_retry(self):
+        worker, backend, storage = self.external_worker()
+        event = {'id': 'external-one', 'input': self.data}
+        first = worker(event)
+        self.assertEqual(worker(event), first)
+        self.assertEqual(backend.calls, 1)
+        self.assertTrue(storage.commits[-1].endswith('result.json'))
+        self.assertTrue(storage.commits[-2].endswith('model.glb'))
+        with self.assertRaisesRegex(ValueError, 'different request'):
+            worker({**event, 'input': {**self.data, 'seed': 123}})
+
+    def test_external_s3_failed_upload_does_not_commit_result(self):
+        worker, backend, storage = self.external_worker(fail_upload=True)
+        with self.assertRaises(RuntimeError):
+            worker({'id': 'external-one', 'input': self.data})
+        self.assertFalse(storage.commits)
+        self.assertEqual(backend.cleaned, 1)
+
+    def test_external_s3_rejects_oversized_stream_before_inference(self):
+        from s3_worker import MAX_IMAGE_BYTES
+        worker, backend, storage = self.external_worker()
+        original = storage.get_object
+        def oversized(**kwargs):
+            result = original(**kwargs)
+            if kwargs['Key'] in self.data['images']:
+                result['ContentLength'] = MAX_IMAGE_BYTES+1
+            return result
+        storage.get_object = oversized
+        with self.assertRaisesRegex(ValueError, '32 MiB'):
+            worker({'id': 'external-one', 'input': self.data})
+        self.assertEqual(backend.calls, 0)
 
     def test_completed_result_download_does_not_need_runpod_api(self):
         result = handler.Worker(FakeBackend(), self.root)({'id': 'job-one', 'input': self.data})

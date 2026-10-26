@@ -14,20 +14,7 @@ import uuid
 from protocol import PREFIX, file_hash, job_id, validate_input
 
 
-def s3_client():
-    import boto3
-    from botocore.config import Config
-    endpoint = os.environ['RUNPOD_S3_ENDPOINT']
-    if not endpoint.startswith('https://'):
-        raise ValueError('RUNPOD_S3_ENDPOINT must use HTTPS.')
-    return boto3.Session().client('s3', endpoint_url=endpoint,
-        region_name=os.environ['RUNPOD_S3_REGION'],
-        aws_access_key_id=os.environ['RUNPOD_S3_ACCESS_KEY_ID'],
-        aws_secret_access_key=os.environ['RUNPOD_S3_SECRET_ACCESS_KEY'],
-        config=Config(signature_version='s3v4', s3={'addressing_style': 'path'},
-                      connect_timeout=10, read_timeout=120,
-                      retries={'total_max_attempts': 5, 'mode': 'standard'},
-                      request_checksum_calculation='when_required', response_checksum_validation='when_required'))
+from storage import bucket_name, read_result, s3_client
 
 
 class RunpodAPI:
@@ -48,19 +35,10 @@ class RunpodAPI:
             raise RuntimeError(f'RunPod returned HTTP {error.code}.') from None
 
 
-def read_result(storage, bucket, key):
-    try:
-        response = storage.get_object(Bucket=bucket, Key=key)
-    except storage.exceptions.NoSuchKey:
-        return None
-    with response['Body'] as stream:
-        return json.load(stream)
-
-
 def submit(args):
     if args.ticket.exists():
         raise ValueError('Ticket already exists; use a new ticket path or fetch the existing job.')
-    storage, bucket = s3_client(), os.environ['RUNPOD_VOLUME_ID']
+    storage, bucket = s3_client(), bucket_name()
     api = RunpodAPI(args.endpoint or os.environ['RUNPOD_ENDPOINT_ID'])
     run = uuid.uuid4().hex
     images = [path.resolve() for path in args.images]
@@ -77,7 +55,7 @@ def submit(args):
         storage.upload_file(str(image), bucket, key)
     submitted = api.request('run', {'input': data})
     identifier = job_id(submitted['id'])
-    ticket = {'job_id': identifier, 'endpoint_id': api.endpoint, 'volume_id': bucket, 'mode': args.mode,
+    ticket = {'job_id': identifier, 'endpoint_id': api.endpoint, 'bucket': bucket, 'mode': args.mode,
               'metadata_key': f'{PREFIX}/outputs/{args.mode}/{identifier}/result.json',
               'input': data, 'input_sha256': [file_hash(image) for image in images]}
     args.ticket.parent.mkdir(parents=True, exist_ok=True)
@@ -109,12 +87,13 @@ def download(storage, bucket, result, output, overwrite=False):
 def fetch(args):
     ticket = json.loads(args.ticket.read_text())
     storage = s3_client()
+    bucket = ticket.get('bucket') or ticket['volume_id']
     started, api = time.monotonic(), None
     while True:
         # Check durable storage first: no GPU wake-up and no dependency on job-result retention.
-        result = read_result(storage, ticket['volume_id'], ticket['metadata_key'])
+        result = read_result(storage, bucket, ticket['metadata_key'])
         if result is not None:
-            download(storage, ticket['volume_id'], result, args.output.absolute(), args.overwrite)
+            download(storage, bucket, result, args.output.absolute(), args.overwrite)
             return
         if api is None:
             api = RunpodAPI(ticket['endpoint_id'])

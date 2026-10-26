@@ -66,15 +66,24 @@ def main():
     import runpod
     from backend import PixalBackend
     volume = Path(os.environ.get('VOLUME_ROOT', '/runpod-volume'))
-    if not volume.is_mount():
-        raise RuntimeError('Attach a persistent RunPod network volume at VOLUME_ROOT before starting this worker.')
+    storage_mode = os.environ.get('ARTIFACT_STORAGE', 'volume')
+    if storage_mode not in ('volume', 's3'):
+        raise ValueError('ARTIFACT_STORAGE must be volume or s3.')
+    if not volume.is_mount() and not (storage_mode == 's3' and os.environ.get('ALLOW_EPHEMERAL_CACHE') == '1'):
+        raise RuntimeError('Attach the model-cache volume, or explicitly enable ALLOW_EPHEMERAL_CACHE=1 with external S3.')
     mode = os.environ.get('PIXAL_MODE', 'multi')
     if mode != 'multi':
         raise ValueError('This deployment supports PIXAL_MODE=multi only.')
     # This executes once at worker startup, before RunPod starts dispatching jobs.
     backend = PixalBackend(mode, low_vram=os.environ.get('PIXAL_LOW_VRAM') == '1')
-    worker = Worker(backend, volume, mode, max_views=int(os.environ.get('MAX_VIEWS', '8')),
-                    max_resolution=int(os.environ.get('MAX_RESOLUTION', '1024')))
+    limits = dict(max_views=int(os.environ.get('MAX_VIEWS', '8')),
+                  max_resolution=int(os.environ.get('MAX_RESOLUTION', '1024')))
+    if storage_mode == 's3':
+        from s3_worker import S3Worker
+        from storage import bucket_name, s3_client
+        worker = S3Worker(backend, s3_client(), bucket_name(), **limits)
+    else:
+        worker = Worker(backend, volume, mode, **limits)
     def handle_job(job):
         return worker(job)
     runpod.serverless.start({'handler': handle_job})

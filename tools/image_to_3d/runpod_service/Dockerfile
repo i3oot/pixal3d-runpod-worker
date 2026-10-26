@@ -18,13 +18,13 @@ RUN python build_sources.py
 RUN pip install --no-cache-dir ninja cmake packaging setuptools wheel \
     && pip install --no-cache-dir torchvision==0.22.0 \
     && pip install --no-cache-dir -r /opt/Pixal3D/requirements.txt \
-    && pip install --no-cache-dir runpod==1.12.0 tensorboard pandas lpips \
+    && pip install --no-cache-dir runpod==1.12.0 boto3==1.43.118 tensorboard pandas lpips \
     && pip install --no-cache-dir 'natten==0.21.0+torch270cu128' -f https://whl.natten.org \
     && pip install --no-cache-dir --no-build-isolation flash-attn==2.7.4.post1 \
     && pip install --no-cache-dir --no-build-isolation /opt/nvdiffrast /opt/nvdiffrec \
     && pip install --no-cache-dir --no-build-isolation /opt/CuMesh /opt/FlexGEMM /opt/TRELLIS.2/o-voxel \
     && pip install --no-cache-dir 'https://github.com/LDYang694/Storages/releases/download/20260430/utils3d-0.0.2-py3-none-any.whl'
-COPY tools/image_to_3d/runpod_service/glb.py tools/image_to_3d/runpod_service/protocol.py tools/image_to_3d/runpod_service/model_cache.py tools/image_to_3d/runpod_service/backend.py tools/image_to_3d/runpod_service/handler.py /opt/worker/
+COPY tools/image_to_3d/runpod_service/storage.py tools/image_to_3d/runpod_service/s3_worker.py tools/image_to_3d/runpod_service/glb.py tools/image_to_3d/runpod_service/protocol.py tools/image_to_3d/runpod_service/model_cache.py tools/image_to_3d/runpod_service/backend.py tools/image_to_3d/runpod_service/handler.py /opt/worker/
 ENV PYTHONPATH=/opt/Pixal3D:/opt/worker \
     PIXAL_MODE=multi \
     ATTN_BACKEND=sdpa \
