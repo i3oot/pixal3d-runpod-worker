@@ -9,15 +9,24 @@
   "executionTimeoutSeconds": 1800,
   "jobTtlSeconds": 86400,
   "flashBoot": true,
-  "networkVolumeGB": 50,
-  "networkVolumeMount": "/runpod-volume",
+  "networkVolumeGB": 0,
   "environment": {
     "PIXAL_MODE": "multi",
     "MAX_RESOLUTION": "1024",
     "MAX_VIEWS": "4",
     "PIXAL_LOW_VRAM": "1",
-    "ARTIFACT_STORAGE": "s3"
+    "ARTIFACT_STORAGE": "s3",
+    "S3_ADDRESSING_STYLE": "virtual",
+    "ALLOW_EPHEMERAL_CACHE": "1",
+    "HF_HOME": "/tmp/pixal3d-cache/huggingface",
+    "TORCH_HOME": "/tmp/pixal3d-cache/torch",
+    "XDG_CACHE_HOME": "/tmp/pixal3d-cache"
   },
   "apiKey": "Restricted to this endpoint; create in RunPod Credentials. Never bake into the worker image.",
-  "externalS3": "Set S3_BUCKET, S3_ENDPOINT_URL (omit for AWS S3), S3_REGION, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY as runtime environment variables/secrets. The network volume is only a model cache in this mode."
+  "externalS3": "Set Hetzner S3_BUCKET, S3_ENDPOINT_URL, S3_REGION, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY as runtime environment variables/secrets. No RunPod network volume; checkpoints are downloaded to temporary disk once per fresh worker.",
+  "dataCenters": [
+    "EU-CZ-1"
+  ],
+  "placement": "EU only. Initial datacenter EU-CZ-1; verify compatible GPU capacity before activation.",
+  "containerDiskGB": 80
 }

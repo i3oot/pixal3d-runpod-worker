@@ -49,8 +49,8 @@ The build context excludes inputs, outputs, model caches and credentials.
 Only files referenced by the pinned multi-view pipeline are downloaded. The
 required 3D checkpoints total **24.045 GB on disk**, including shared decoders.
 Allow roughly **26–30 GB for checkpoints plus helper caches**, an estimate until
-first startup is measured. A **50 GB network volume** leaves initial room for
-inputs and outputs. The full upstream repository is about 46 GB because it also
+first startup is measured. An optional **50 GB network volume** would leave initial room for
+the cache. The initial deployment instead uses temporary container disk. The full upstream repository is about 46 GB because it also
 contains single-view weights; this worker does not download those.
 
 Disk size is not a VRAM requirement. Start with a **24 GB RTX 4090 and
@@ -68,22 +68,31 @@ Verify current [GPU pricing](https://www.runpod.io/product/serverless) and
 
 ## Endpoint setup
 
-`endpoint-settings.json` is a console checklist, not an API request body:
+`endpoint-settings.json` is a console checklist, not an API request body. The
+initial deployment uses external S3 and **no RunPod network volume**:
 
+- EU placement only; initial datacenter `EU-CZ-1`, subject to compatible GPU capacity.
 - Queue-based endpoint, one GPU per worker; active workers 0, max workers 1.
 - Idle timeout 60 seconds, execution timeout 1800 seconds, job TTL 24 hours.
-- Attach the persistent 50 GB network volume at `/runpod-volume`; choose a region
-  with compatible GPU capacity and RunPod's S3 API.
-- Set `PIXAL_MODE=multi`, `PIXAL_LOW_VRAM=1`, `MAX_VIEWS=4`, `MAX_RESOLUTION=1024`.
-- Use a restricted RunPod API key scoped to this endpoint on the client.
+- Allocate **80 GB temporary container disk** as an initial allowance for the
+  image, model cache and job files; verify actual disk usage on first startup.
+- Set `PIXAL_MODE=multi`, `PIXAL_LOW_VRAM=1`, `MAX_VIEWS=4`, `MAX_RESOLUTION=1024`,
+  `ARTIFACT_STORAGE=s3`, `ALLOW_EPHEMERAL_CACHE=1`.
+- Set `HF_HOME=/tmp/pixal3d-cache/huggingface`,
+  `TORCH_HOME=/tmp/pixal3d-cache/torch`, `XDG_CACHE_HOME=/tmp/pixal3d-cache`.
+- Configure external S3 credentials below. Use a restricted RunPod API key scoped
+  to this endpoint on the client.
 
-By default the worker requires a model-cache volume. Weights are downloaded on
-first startup and reused from persistent storage on later cold starts. Each warm
-worker initializes one backend before accepting jobs and serializes requests.
-Queue the whole batch to keep one worker warm. After the queue drains, the idle
-timeout lets RunPod terminate it; the next cold worker must initialize again.
-RunPod can disable max workers after seven days of endpoint inactivity; restore
-max workers to one if an old endpoint leaves a new batch queued.
+Each fresh worker downloads the roughly 26–30 GB model cache; this increases cold
+start time and billed startup work. Temporary files disappear when the worker is
+terminated. External input/output objects remain in S3. Each warm worker initializes
+one backend before accepting jobs and serializes requests. Queue the entire
+batch to keep it warm. The model is not reloaded between ordinary jobs.
+
+Without explicit `ALLOW_EPHEMERAL_CACHE=1` in external S3 mode, the worker requires
+a model-cache volume. Adding one later is optional. RunPod can disable max workers
+after seven days of endpoint inactivity; restore max workers to one if an old
+endpoint leaves a new batch queued.
 
 ## Client
 
@@ -128,9 +137,9 @@ keys are absent. Do not embed secrets in endpoint URLs or request payloads.
 A private MinIO deployment must be reachable over HTTPS from RunPod workers and
 the client. Provider request and data-transfer charges can apply.
 
-Model caching is independent of artifact storage. Keeping the network volume
-for the roughly 26–30 GB model cache avoids repeated checkpoint downloads. To
-use **no RunPod network volume**, set `ALLOW_EPHEMERAL_CACHE=1` alongside
+Model caching is independent of artifact storage. An optional network volume
+for the roughly 26–30 GB model cache avoids repeated checkpoint downloads. The
+initial deployment uses **no RunPod network volume**: set `ALLOW_EPHEMERAL_CACHE=1` alongside
 `ARTIFACT_STORAGE=s3`, set `HF_HOME`, `TORCH_HOME` and `XDG_CACHE_HOME` to writable
 container-disk cache paths, and allocate enough container disk for the image,
 cache and temporary job files. Each fresh worker then downloads weights again;
