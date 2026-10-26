@@ -5,9 +5,9 @@ warm worker, persistent textured GLB outputs and GPU scale-to-zero.
 **Multi-view only.** The worker downloads only the checkpoints required by
 Pixal3D multi-view inference.
 
-The CPU contract tests pass. CUDA image compilation, real GPU inference and live
-endpoint deployment still need verification; do not treat the GPU profile below
-as a measured memory requirement.
+The CPU contract tests and CUDA container build pass. Anonymous pulling of the
+public image is verified. Real GPU inference and live endpoint deployment still
+need verification; do not treat the GPU profile below as a measured memory requirement.
 
 ## Inputs
 
@@ -27,8 +27,8 @@ The eight-view maximum is a configurable service limit, not a claimed model limi
 GitHub Actions tests and builds the CUDA image on pushes to `main`, then publishes
 `ghcr.io/i3oot/pixal3d-runpod-worker:latest` and a commit-SHA tag. The workflow uses
 GitHub's built-in `GITHUB_TOKEN` with `packages:write`; no registry credential needs
-to be committed. After first publication, set the GHCR package visibility to
-public so RunPod can pull without a registry secret. Prefer a verified SHA tag or
+to be committed. The published GHCR package is public, so RunPod can pull without a registry
+secret. For a fork, check package visibility after the first publication. Prefer a verified SHA tag or
 digest for deployment.
 
 Local build from the repository root:
@@ -160,7 +160,7 @@ for the roughly 26–30 GB model cache avoids repeated checkpoint downloads. To
 use **no RunPod network volume**, set `ALLOW_EPHEMERAL_CACHE=1` alongside
 `ARTIFACT_STORAGE=s3`, set `HF_HOME`, `TORCH_HOME` and `XDG_CACHE_HOME` to writable
 container-disk cache paths, and allocate enough container disk for the image,
-cache and temporary job files. Each fresh worker then downloads weights again;
+cache and temporary job files. Without a matching platform cache, each fresh worker downloads weights again;
 that can substantially increase startup time and GPU cost.
 
 Legacy RunPod-volume storage remains available with `ARTIFACT_STORAGE=volume`.
@@ -229,8 +229,8 @@ partial GLBs. Tickets contain identifiers and input provenance, not credentials.
 `fetch` checks persistent storage first, so completed jobs remain downloadable
 **without a GPU worker or RunPod status API call**, including after the async API's
 30-minute result retention. Downloads are checksum- and GLB-validated. Use
-`--overwrite` to replace an existing output. Inputs and outputs remain on the
-volume until explicitly deleted; monitor free space.
+`--overwrite` to replace an existing output. Inputs and outputs remain in the configured storage until explicitly deleted;
+monitor storage usage.
 
 ## Validation and licensing
 
