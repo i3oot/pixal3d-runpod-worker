@@ -74,14 +74,16 @@ def main():
     mode = os.environ.get('PIXAL_MODE', 'multi')
     if mode != 'multi':
         raise ValueError('This deployment supports PIXAL_MODE=multi only.')
-    # This executes once at worker startup, before RunPod starts dispatching jobs.
-    backend = PixalBackend(mode, low_vram=os.environ.get('PIXAL_LOW_VRAM') == '1')
     limits = dict(max_views=int(os.environ.get('MAX_VIEWS', '8')),
                   max_resolution=int(os.environ.get('MAX_RESOLUTION', '1024')))
     if storage_mode == 's3':
         from s3_worker import S3Worker
         from storage import bucket_name, s3_client
-        worker = S3Worker(backend, s3_client(), bucket_name(), **limits)
+        bucket, storage = bucket_name(), s3_client()
+    # This executes once at worker startup, before RunPod starts dispatching jobs.
+    backend = PixalBackend(mode, low_vram=os.environ.get('PIXAL_LOW_VRAM') == '1')
+    if storage_mode == 's3':
+        worker = S3Worker(backend, storage, bucket, **limits)
     else:
         worker = Worker(backend, volume, mode, **limits)
     def handle_job(job):
