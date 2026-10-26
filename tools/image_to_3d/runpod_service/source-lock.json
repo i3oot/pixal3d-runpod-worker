@@ -1,0 +1,32 @@
+{
+  "trellis2": {
+    "repo": "microsoft/TRELLIS.2",
+    "revision": "75fbf0183001ed9876c8dbb35de6b68552ee08bd"
+  },
+  "cumesh": {
+    "repo": "JeffreyXiang/CuMesh",
+    "revision": "12289e1062f0603f2f0d0771b02e1395d247f26f"
+  },
+  "flexgemm": {
+    "repo": "JeffreyXiang/FlexGEMM",
+    "revision": "6dd94a859c26ee8246888502eada3dd8ad85532e"
+  },
+  "nvdiffrec": {
+    "repo": "JeffreyXiang/nvdiffrec",
+    "revision": "b296927cc7fd01c2ac1087c8065c4d7248f72da4"
+  },
+  "runpod": {
+    "version": "1.12.0"
+  },
+  "boto3": {
+    "version": "1.43.118"
+  },
+  "pixal3d": {
+    "repo": "TencentARC/Pixal3D",
+    "revision": "f7cf38429b0bd264f1995f0f8743a88b1c728b94"
+  },
+  "model": {
+    "repo": "TencentARC/Pixal3D",
+    "revision": "b0cb2e1b794cab9aa0ac38a95d794a4d9337437f"
+  }
+}

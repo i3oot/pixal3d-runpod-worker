@@ -1,0 +1,53 @@
+name: Build and publish Pixal3D worker
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Run CPU contract tests
+        run: |
+          python3 -m unittest discover -s tools/image_to_3d/runpod_service -p 'test_*.py' -v
+          python3 -m py_compile tools/image_to_3d/runpod_service/*.py
+      - name: Make room for the CUDA image
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          df -h /
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: tools/image_to_3d/runpod_service/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/i3oot/pixal3d-runpod-worker:latest
+            ghcr.io/i3oot/pixal3d-runpod-worker:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/i3oot/pixal3d-runpod-worker
+            org.opencontainers.image.description=Pixal3D multi-view RunPod queue worker
+          cache-from: type=gha
+          cache-to: type=gha,mode=min

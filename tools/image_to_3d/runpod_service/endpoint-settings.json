@@ -1,0 +1,21 @@
+{
+  "note": "Console configuration checklist; not an API request payload.",
+  "type": "queue-based",
+  "gpu": "RTX 4090 (24 GB, compute capability 8.9), initial low-VRAM benchmark; 48 GB Ada fallback if necessary",
+  "gpusPerWorker": 1,
+  "activeWorkers": 0,
+  "maxWorkers": 1,
+  "idleTimeoutSeconds": 60,
+  "executionTimeoutSeconds": 1800,
+  "jobTtlSeconds": 86400,
+  "flashBoot": true,
+  "networkVolumeGB": 50,
+  "networkVolumeMount": "/runpod-volume",
+  "environment": {
+    "PIXAL_MODE": "multi",
+    "MAX_RESOLUTION": "1024",
+    "MAX_VIEWS": "4",
+    "PIXAL_LOW_VRAM": "1"
+  },
+  "apiKey": "Restricted to this endpoint; create in RunPod Credentials. Never bake into the worker image."
+}

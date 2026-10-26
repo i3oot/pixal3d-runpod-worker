@@ -1,0 +1,9 @@
+**
+!tools
+!tools/image_to_3d
+!tools/image_to_3d/runpod_service
+!tools/image_to_3d/runpod_service/*.py
+!tools/image_to_3d/runpod_service/source-lock.json
+!tools/image_to_3d/runpod_service/constraints.txt
+!tools/image_to_3d/runpod_service/Dockerfile
+tools/image_to_3d/runpod_service/test_*.py
