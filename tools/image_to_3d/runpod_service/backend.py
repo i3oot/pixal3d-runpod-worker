@@ -44,6 +44,13 @@ class PixalBackend:
             self.api.check_main_view(views)
             meshes, latents = pipeline.run_mv(views, **common)
             mesh, resolution = meshes[0], latents[2]
+            # CuMesh allocates through CUDA directly, outside PyTorch's allocator.
+            # Release sampling-only tensors and cached blocks before its peak
+            # BVH/simplification allocations, while retaining the decoded mesh.
+            del meshes, latents, views
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
             glb = o_voxel.postprocess.to_glb(
                 vertices=mesh.vertices, faces=mesh.faces, attr_volume=mesh.attrs,
                 coords=mesh.coords, attr_layout=pipeline.pbr_attr_layout, grid_size=resolution,
