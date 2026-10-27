@@ -1,0 +1,12 @@
+FROM ghcr.io/i3oot/pixal3d-runpod-worker@sha256:f632a35ee12693e82c3f62562fc67874c386ec500b5123554d65e6d1c16c5758
+
+# Keep the proven runtime/model pins; add only native CUDA kernels for the
+# next larger Ampere/Hopper worker pools while retaining existing Ada support.
+ENV TORCH_CUDA_ARCH_LIST="8.0;8.9;9.0+PTX" \
+    MAX_JOBS=2 \
+    CMAKE_BUILD_PARALLEL_LEVEL=2
+RUN pip install --no-cache-dir --no-deps --no-build-isolation --force-reinstall \
+      /opt/nvdiffrast /opt/nvdiffrec /opt/CuMesh /opt/FlexGEMM /opt/TRELLIS.2/o-voxel
+COPY tools/image_to_3d/runpod_service/check_cuda_arches.py /opt/worker/check_cuda_arches.py
+RUN python /opt/worker/check_cuda_arches.py
+
