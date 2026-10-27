@@ -6,8 +6,9 @@ warm worker, persistent textured GLB outputs and GPU scale-to-zero.
 Pixal3D multi-view inference.
 
 The CPU contract tests and CUDA container build pass. Anonymous pulling of the
-public image is verified. Real GPU inference and live endpoint deployment still
-need verification; do not treat the GPU profile below as a measured memory requirement.
+public image is verified. A live endpoint has produced checksum-validated textured
+GLBs on a 24 GB NVIDIA L4. This establishes that the tested inputs fit, not a
+universal peak-memory requirement for arbitrary assets.
 
 ## Inputs
 
@@ -15,7 +16,8 @@ Provide 2–8 images with matching camera metadata, using the upstream Blender/N
 camera-to-world convention. Each `transforms.json` frame needs a 4x4
 `transform_matrix` and horizontal `camera_angle_x` in radians (or a shared angle
 at the root). Image argument order must match frame order; frame zero should be
-the canonical front view. The service preserves image framing when masking.
+the canonical front view. The service preserves image framing when masking. Upstream inference resizes
+images to a square; use square views to avoid changing object proportions.
 
 These must be consistent, posed views of one object. A collection of AI-generated
 front/rear pictures does not automatically provide calibrated cameras. See the
@@ -38,8 +40,8 @@ docker build -f tools/image_to_3d/runpod_service/Dockerfile \
   -t pixal3d-runpod-worker .
 ```
 
-The image targets **SM 8.9 / Ada**, CUDA 12.8 and PyTorch 2.7. Suitable proposed
-GPUs include RTX 4090, L40S and RTX 6000 Ada. Other architectures require a rebuild
+The image targets **SM 8.9 / Ada**, CUDA 12.8 and PyTorch 2.7. Suitable
+GPUs include the tested L4, RTX 4090, L40S and RTX 6000 Ada. Other architectures require a rebuild
 and kernel compatibility checks. Source revisions are pinned in `source-lock.json`;
 transitive system/Python dependencies are not a complete reproducible lock.
 The build context excludes inputs, outputs, model caches and credentials.
@@ -53,14 +55,22 @@ first startup is measured. An optional **50 GB network volume** would leave init
 the cache. Temporary container disk is an alternative without a persistent volume. The full upstream repository is about 46 GB because it also
 contains single-view weights; this worker does not download those.
 
-Disk size is not a VRAM requirement. Start with a **24 GB RTX 4090 and
-`PIXAL_LOW_VRAM=1`** for a benchmark; 48 GB Ada is a fallback if measured peaks
-require it. Multi-view peak VRAM has not been established here. Low-VRAM mode
-retains loaded objects in CPU memory and moves stages to the GPU as needed;
-ensure the worker also has enough host RAM.
+Disk size is not a VRAM requirement. A **24 GB L4 with `PIXAL_LOW_VRAM=1`**
+completed vehicle and character generations, including a test using four calibrated
+Blender views. Complex mesh export also produced a CuMesh CUDA out-of-memory
+error. The worker now releases sampling-only tensors and unused PyTorch CUDA
+cache before native export; benchmark complex assets on the updated image.
+A 48 GB Ada GPU remains an option when measured peaks require it.
 
-As a planning estimate, RunPod lists RTX 4090 Serverless around $1.10 per running
-hour and 48 GB Ada around $1.75, subject to current console pricing. Standard
+Low-VRAM mode retains loaded objects in CPU memory and moves stages to the GPU
+as needed. Host RAM also matters: a roughly 62 GB RAM worker completed tests,
+while a roughly 31 GB RAM worker reached 98% host-memory utilization during
+unstable runs. Prefer at least 64 GB host RAM where scheduling permits it; do
+not confuse that allocation with GPU VRAM. This is an observed working profile,
+not a measured minimum.
+
+As a planning estimate, RunPod lists L4 Serverless around $0.69 per running
+hour, RTX 4090 around $1.10 and 48 GB Ada around $1.75, subject to current console pricing. Standard
 network-volume storage below 1 TB is $0.07/GB/month: **50 GB is about $3.50/month**,
 even with zero GPU workers. Startup, inference and idle time affect GPU cost.
 Verify current [GPU pricing](https://www.runpod.io/product/serverless) and
@@ -243,8 +253,10 @@ partial-output failure handling, camera/path validation, multi-only cache
 selection, immutable snapshot overlays, external S3 commit/retry/failure handling and durable
 download without GPU API use.
 These do not verify CUDA compatibility, model quality or peak VRAM. Before normal
-traffic, run two real jobs on one worker, validate the outputs, then verify worker
-count reaches zero and downloads still work.
+traffic with a new image/hardware combination, run two real jobs on one worker,
+validate the outputs, then verify worker count reaches zero and downloads still
+work. Live tests have confirmed reuse of one worker across three sequential jobs,
+durable downloads, and scale-to-zero for the tested deployment.
 
 The wrapper is MIT licensed. Third-party sources and models retain their own
 terms. Pixal3D is MIT; its DINOv3 dependency has separate terms. The runtime overlay
